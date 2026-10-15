@@ -6,14 +6,13 @@
     path: "{{ item }}"
     state: directory
   loop:
-    - "{{ bastion_cluster_config_dir }}"
-    - "{{ bastion_cluster_config_dir }}/aap"
-    - "{{ bastion_cluster_config_dir }}/catalogsources"
-    - "{{ bastion_cluster_config_dir }}/gitops"
-    - "{{ bastion_cluster_config_dir }}/localstorage"
-    - "{{ bastion_cluster_config_dir }}/minio"
-    - "{{ bastion_cluster_config_dir }}/odf"
-    - "{{ bastion_cluster_config_dir }}/openshift-monitoring"
+  - "{{ bastion_cluster_config_dir }}"
+  - "{{ bastion_cluster_config_dir }}/aap"
+  - "{{ bastion_cluster_config_dir }}/catalogsources"
+  - "{{ bastion_cluster_config_dir }}/gitops"
+  - "{{ bastion_cluster_config_dir }}/localstorage"
+  - "{{ bastion_cluster_config_dir }}/odf"
+  - "{{ bastion_cluster_config_dir }}/openshift-monitoring"
 
 - name: Auto-detect ai_cluster_id when not provided
   when: ai_cluster_id is not defined
@@ -38,29 +37,34 @@
         the cluster install completed successfully.
     when: ai_clusters_matched | length == 0
 
-  - name: Fail if multiple installed clusters match cluster_name
-    fail:
+  - name: Sort matched clusters by creation time, newest last
+    set_fact:
+      ai_clusters_matched: "{{ ai_clusters_matched | sort(attribute='created_at') }}"
+
+  - name: Warn when multiple installed clusters match cluster_name
+    debug:
       msg: >-
         Multiple installed Assisted Installer clusters named '{{ cluster_name }}' were found
-        ({{ ai_clusters_matched | map(attribute='id') | join(', ') }}). Pass -e ai_cluster_id=<id>
-        explicitly to disambiguate.
+        ({{ ai_clusters_matched | map(attribute='id') | join(', ') }}). Picking the newest one
+        (created at {{ ai_clusters_matched[-1].created_at }}): {{ ai_clusters_matched[-1].id }}.
+        Pass -e ai_cluster_id=<id> explicitly to pick a different one.
     when: ai_clusters_matched | length > 1
 
   - name: Set ai_cluster_id from lookup
     set_fact:
-      ai_cluster_id: "{{ ai_clusters_matched[0].id }}"
+      ai_cluster_id: "{{ ai_clusters_matched[-1].id }}"
 
 - name: Get credentials (kubeconfig and kubeadmin password) from installed cluster
   get_url:
     url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters/{{ ai_cluster_id }}/downloads/credentials?file_name={{ item.name }}"
     dest: "{{ bastion_cluster_config_dir }}/{{ item.dest }}"
   loop:
-    - name: kubeadmin-password
-      dest: kubeadmin-password
-    - name: kubeconfig
-      dest: kubeconfig
-    - name: kubeconfig
-      dest: kubeconfig.backup
+  - name: kubeadmin-password
+    dest: kubeadmin-password
+  - name: kubeconfig
+    dest: kubeconfig
+  - name: kubeconfig
+    dest: kubeconfig.backup
 
 - name: Wait until cluster is stable
   shell: |
@@ -68,8 +72,10 @@
   when: wait_until_cluster_stable | bool
 
 - name: Remove assisted-installer namespace
-  shell: |
-    KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc delete ns assisted-installer
+  environment:
+    KUBECONFIG: "{{ bastion_cluster_config_dir }}/kubeconfig"
+  ansible.builtin.shell: |
+    oc delete namespace assisted-installer --ignore-not-found=true
   when: remove_assisted_installer_namespace
 
 - name: Apply post-install labels to worker node(s)
@@ -82,26 +88,24 @@
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
   loop:
-    - src: ansible-automation-platform-operator.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/aap/ansible-automation-platform-operator.yml"
-    - src: openshift-gitops-operator.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/gitops/openshift-gitops-operator.yml"
-    - src: localstorage.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/localstorage/localstorage.yml"
-    - src: localvolume-lvm.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/localstorage/localvolume-lvm.yml"
-    - src: localvolume-disk.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/localstorage/localvolume-disk.yml"
-    - src: minio.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/minio/minio.yml"
-    - src: odf.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/odf/odf.yml"
-    - src: odf-storagecluster.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/odf/odf-storagecluster.yml"
-    - src: cluster-monitoring-config.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/openshift-monitoring/cluster-monitoring-config.yml"
-    - src: catalogsource.yml.j2
-      dest: "{{ bastion_cluster_config_dir }}/catalogsources/catalogsource.yml"
+  - src: ansible-automation-platform-operator.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/aap/ansible-automation-platform-operator.yml"
+  - src: openshift-gitops-operator.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/gitops/openshift-gitops-operator.yml"
+  - src: localstorage.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/localstorage/localstorage.yml"
+  - src: localvolume-lvm.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/localstorage/localvolume-lvm.yml"
+  - src: localvolume-disk.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/localstorage/localvolume-disk.yml"
+  - src: odf.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/odf/odf.yml"
+  - src: odf-storagecluster.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/odf/odf-storagecluster.yml"
+  - src: cluster-monitoring-config.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/openshift-monitoring/cluster-monitoring-config.yml"
+  - src: catalogsource.yml.j2
+    dest: "{{ bastion_cluster_config_dir }}/catalogsources/catalogsource.yml"
 
 - name: Clone performance-dashboards
   git:
@@ -120,8 +124,10 @@
   when: setup_performance_dashboards | bool
 
 - name: Add kube-burner sa
-  shell: |
-    KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc create sa kubeburner
+  environment:
+    KUBECONFIG: "{{ bastion_cluster_config_dir }}/kubeconfig"
+  ansible.builtin.shell: |
+    oc create sa kubeburner --dry-run=client -o yaml | oc apply -f -
   when: setup_kube_burner_sa | default(true) | bool
 
 - name: Add cluster-admin role to kube-burner sa
@@ -131,24 +137,24 @@
 
 - name: Pre-GA block
   when:
-    - use_prega_content | default(false) | bool
-    - prega_idms_link is defined
-    - prega_idms_link | length > 0
+  - use_prega_content | default(false) | bool
+  - prega_idms_link is defined
+  - prega_idms_link | length > 0
   block:
-    - name: Delete previous IDMS configuration
-      ansible.builtin.file:
-        path: "{{ idms_prega_configuration }}"
-        state: absent
+  - name: Delete previous IDMS configuration
+    ansible.builtin.file:
+      path: "{{ idms_prega_configuration }}"
+      state: absent
 
-    - name: Download IDMS configuration
-      ansible.builtin.uri:
-        url: "{{ prega_idms_link }}"
-        dest: "{{ idms_prega_configuration }}"
-        mode: '0644'
-      register: idms_download_result
-      until: idms_download_result is not failed
-      retries: 3
-      delay: 5
+  - name: Download IDMS configuration
+    ansible.builtin.uri:
+      url: "{{ prega_idms_link }}"
+      dest: "{{ idms_prega_configuration }}"
+      mode: '0644'
+    register: idms_download_result
+    until: idms_download_result is not failed
+    retries: 3
+    delay: 5
 
 - name: Disable default OperatorHub sources on bastion registry clusters
   shell: |
@@ -258,11 +264,6 @@
       KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc wait storagecluster/ocs-storagecluster -n openshift-storage --for=jsonpath='{.status.phase}'=Ready --timeout={{ wait_for_odf_storagecluster_ready_timeout }}
     when: wait_for_odf_storagecluster_ready | bool
 
-- name: Setup Minio
-  when: setup_minio | bool
-  shell: |
-    KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc apply -f {{ bastion_cluster_config_dir }}/minio/minio.yml
-
 - name: Migrate ingresscontrollers (OpenShift Router) to master nodes
   when: migrate_ingresscontrollers | bool
   shell: |
@@ -272,3 +273,49 @@
   when: (migrate_monitoring | bool) or ((apply_cluster_monitoring_config | bool) and (setup_lso | bool))
   shell:
     KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc apply -f {{ bastion_cluster_config_dir }}/openshift-monitoring/cluster-monitoring-config.yml
+
+- name: Set default storage class
+  when: set_default_storage_class | bool
+  block:
+  - name: Determine default storage class
+    set_fact:
+      calculated_default_storage_class: |-
+        {%- if default_storage_class | length > 0 -%}
+          {{ default_storage_class }}
+        {%- elif setup_odf | bool -%}
+          ocs-storagecluster-cephfs
+        {%- elif setup_lso | bool -%}
+          {%- if (controlplane_localstorage_lvm_devices | length > 0) or (worker_localstorage_lvm_devices | length > 0) -%}
+            localstorage-sc
+          {%- elif (controlplane_localstorage_disk_devices | length > 0) or (worker_localstorage_disk_devices | length > 0) -%}
+            localstorage-disk-sc
+          {%- else -%}
+
+          {%- endif -%}
+        {%- else -%}
+
+        {%- endif -%}
+
+  - name: Display determined default storage class
+    debug:
+      msg: "Setting {{ calculated_default_storage_class }} as default storage class"
+    when: calculated_default_storage_class | length > 0
+
+  - name: Wait for default storage class to exist
+    shell: |
+      KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc get storageclass {{ calculated_default_storage_class }}
+    register: sc_exists
+    until: not sc_exists.failed
+    retries: 60
+    delay: 5
+    when: calculated_default_storage_class | length > 0
+
+  - name: Remove default annotation from all storage classes
+    shell: |
+      KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc annotate storageclass --all storageclass.kubernetes.io/is-default-class- --overwrite
+    when: calculated_default_storage_class | length > 0
+
+  - name: Set default storage class annotation
+    shell: |
+      KUBECONFIG={{ bastion_cluster_config_dir }}/kubeconfig oc annotate storageclass {{ calculated_default_storage_class }} storageclass.kubernetes.io/is-default-class=true --overwrite
+    when: calculated_default_storage_class | length > 0

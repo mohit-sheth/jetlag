@@ -66,6 +66,8 @@ Change `lab` to match your environment:
 
 Change `lab_cloud` to `lab_cloud: cloud99`
 
+If your lab runs QUADS 3.0+, set `quads_api_token` to your QUADS API token. Generate a `qat_` token from your [QUADS profile page](https://github.com/quadsproject/quads/blob/development/docs/google-oauth-setup.md#authenticated-user-calls) or via `POST /api/v3/tokens/<email>/`. This token is required to download the `ocpinventory.json` file from QUADS 3+. Leave empty for QUADS 2.x environments.
+
 Change `cluster_type` to `cluster_type: vmno`
 
 Set `worker_node_count` to limit the number of worker nodes. Set it to `0` if you want a 3 node compact cluster. For this example `worker_node_count` is set to `5` such that the entire cluster will be 8 nodes (3 controlplane + 5 workers).
@@ -137,11 +139,6 @@ In some VM scenarios, hugepages may be required. To configure VMs with hugepages
 
 Change `lab` to match your environment (same value as in `all.yml`).
 
-Change `hv_vm_generate_manifests` to `hv_vm_generate_manifests: false`
-
-VM manifests are only used in conjunction with ACM/MCE testing.
-
-
 For the metrics collection to work, set following variable:
 ```yaml
 setup_hv_metrics: true
@@ -163,6 +160,11 @@ The `ansible/vars/all.yml` now resembles ...
 lab: performancelab
 # Which cloud in the lab environment (Ex cloud42)
 lab_cloud: cloud99
+
+# QUADS API token for authenticated inventory download (required for QUADS 3+)
+# Generate a qat_ token from your QUADS profile page or via POST /api/v3/tokens/<email>/
+# Leave empty for QUADS 2.x environments that don't require authentication
+quads_api_token: qat_xxxxx
 
 # Either mno or sno
 cluster_type: vmno
@@ -371,8 +373,8 @@ ssh_public_key_file: ~/.ssh/id_rsa.pub
 
 install_tc: true
 
-# Setup and use coredns instead of dnsmasq
-setup_coredns: false
+# Coredns is default DNS (False uses dnsmasq, dnsmasq to be removed in future)
+setup_coredns: true
 
 # Enables using DHCP instead of relying on static network configuration for VMs
 setup_hv_vm_dhcp: false
